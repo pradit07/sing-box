@@ -4,11 +4,27 @@ TAGS ?= with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api
 TAGS_TEST ?= with_gvisor,with_quic,with_wireguard,with_grpc,with_ech,with_utls,with_shadowsocksr
 PARAMS = -v -trimpath -tags "$(TAGS)" -ldflags "-s -w -buildid="
 MAIN = ./cmd/sing-box
+DIST = ./dist
 
 .PHONY: test release
 
 build:
 	go build $(PARAMS) $(MAIN)
+
+linux-amd64:
+	GOOS=linux GOARCH=amd64 go build $(PARAMS) -o $(DIST)/$(NAME)-linux-amd64 $(MAIN)
+
+linux-arm64:
+	GOOS=linux GOARCH=arm64 go build $(PARAMS) -o $(DIST)/$(NAME)-linux-arm64 $(MAIN)
+
+darwin-amd64:
+	GOOS=darwin GOARCH=amd64 go build $(PARAMS) -o $(DIST)/$(NAME)-darwin-amd64 $(MAIN)
+
+darwin-arm64:
+	GOOS=darwin GOARCH=arm64 go build $(PARAMS) -o $(DIST)/$(NAME)-darwin-arm64 $(MAIN)
+
+windows-amd64:
+	GOOS=windows GOARCH=amd64 go build $(PARAMS) -o $(DIST)/$(NAME)-windows-amd64.exe $(MAIN)
 
 install:
 	go install $(PARAMS) $(MAIN)

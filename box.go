@@ -14,6 +14,7 @@ import (
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/outbound"
+	"github.com/sagernet/sing-box/provider"
 	"github.com/sagernet/sing-box/route"
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -27,6 +28,7 @@ type Box struct {
 	router      adapter.Router
 	inbounds    []adapter.Inbound
 	outbounds   []adapter.Outbound
+	providers   []adapter.Provider
 	logFactory  log.Factory
 	logger      log.ContextLogger
 	logFile     *os.File
@@ -107,6 +109,7 @@ func New(ctx context.Context, options option.Options) (*Box, error) {
 	}
 	inbounds := make([]adapter.Inbound, 0, len(options.Inbounds))
 	outbounds := make([]adapter.Outbound, 0, len(options.Outbounds))
+	providers := make([]adapter.Provider, 0, len(options.Providers))
 	for i, inboundOptions := range options.Inbounds {
 		var in adapter.Inbound
 		var tag string
@@ -144,7 +147,27 @@ func New(ctx context.Context, options option.Options) (*Box, error) {
 		}
 		outbounds = append(outbounds, out)
 	}
-	err = router.Initialize(inbounds, outbounds, func() adapter.Outbound {
+	for i, providerOptions := range options.Providers {
+		var p adapter.Provider
+		var tag string
+		if providerOptions.Tag != "" {
+			tag = providerOptions.Tag
+		} else {
+			tag = F.ToString(i)
+		}
+		p, err = provider.NewRemote(
+			ctx,
+			router, outbound.New,
+			logFactory.NewLogger(F.ToString("provider", "[", tag, "]")),
+			logFactory,
+			providerOptions,
+		)
+		if err != nil {
+			return nil, E.Cause(err, "parse provider[", i, "]")
+		}
+		providers = append(providers, p)
+	}
+	err = router.Initialize(inbounds, outbounds, providers, func() adapter.Outbound {
 		out, oErr := outbound.New(ctx, router, logFactory.NewLogger("outbound/direct"), option.Outbound{Type: "direct", Tag: "default"})
 		common.Must(oErr)
 		outbounds = append(outbounds, out)
@@ -174,6 +197,7 @@ func New(ctx context.Context, options option.Options) (*Box, error) {
 		router:      router,
 		inbounds:    inbounds,
 		outbounds:   outbounds,
+		providers:   providers,
 		createdAt:   createdAt,
 		logFactory:  logFactory,
 		logger:      logFactory.Logger(),
@@ -202,6 +226,18 @@ func (s *Box) Start() error {
 }
 
 func (s *Box) start() error {
+	for i, provider := range s.providers {
+		err := provider.Start()
+		if err != nil {
+			var tag string
+			if provider.Tag() == "" {
+				tag = F.ToString(i)
+			} else {
+				tag = provider.Tag()
+			}
+			return E.Cause(err, "initialize provider [", tag, "]")
+		}
+	}
 	for i, out := range s.outbounds {
 		if starter, isStarter := out.(common.Starter); isStarter {
 			err := starter.Start()
@@ -260,6 +296,9 @@ func (s *Box) Close() error {
 	}
 	for _, out := range s.outbounds {
 		common.Close(out)
+	}
+	for _, provider := range s.providers {
+		provider.Close()
 	}
 	return common.Close(
 		s.router,
